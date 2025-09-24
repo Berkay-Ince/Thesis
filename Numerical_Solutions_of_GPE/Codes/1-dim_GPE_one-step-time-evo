@@ -1,0 +1,94 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import time
+#parameters
+start = time.time()
+Nx = 4097 #Number of grid
+Lx = 6.0 #[-Lx,Lx]
+g = 0 #Str of coupling
+lam0 = 1 #exp(-x^2/lam0)
+tol = 1e-10 #energy changing limit
+max_step = 2_000_000 #Safety limit
+renorm_every = 1 #how frequent making renormalization. it needs to be positive integer
+f = 2 #str of potential omega^2
+#hbar=m=omega=1
+
+#space grid & time step
+
+x = np.linspace(-Lx,Lx,Nx) #array
+dx = x[1]-x[0] #delta x
+dt = 0.2*dx*dx #imaginary time step
+
+#Kinetic and Potential Part
+
+def laplacian_1d(psi): #laplacian for 1-dim with one-step position shift
+    lap = np.empty_like(psi)
+    lap[1:-1] = (psi[2:]-2*psi[1:-1]+psi[:-2])/(dx*dx)
+    lap[0] = lap[-1]= 0
+    #psi = (np.roll(psi,-1)-2*psi+np.roll(psi,1))/(dx*dx)
+    return lap
+#lap[2:] psi_j+1
+#lap[1:-1] psi_j
+#lap[:-2] psi_j-1
+
+#for dirichlet BC
+
+#def normalize(psi):
+#    psi[0] = 0.0
+#    psi[-1] = 0.0
+#    nrm = np.sum(np.abs(psi)**2)*dx
+#    psi /= np.sqrt(nrm + 1e-300)
+#    return psi
+
+def kinetic(psi): #kinetic term
+    return -0.5*laplacian_1d(psi)
+
+Vx = 0.5*f*x**2 #potential term = 0.5*x^2
+
+# Initial State
+
+psi0 = np.exp(-x*x/lam0) #exp(-x/lam0)
+psi0 /= np.linalg.norm(psi0)*np.sqrt(dx) #normalization of psi0 and dx
+
+#Energy
+
+def energy(psi):
+    dpsi = (np.roll(psi,-1) - np.roll(psi,1))/(2*dx) #here why did we used two-step version
+    kin = 0.5*np.sum(np.abs(dpsi)**2)*dx
+    pot = np.sum(Vx*np.abs(psi)**2)*dx
+    non = 0.5*g*np.sum(np.abs(psi)**4)*dx
+    return kin+pot+non
+
+#Road to Ground State
+
+#Bootstrap
+
+psi_prev = psi0.copy() #To not lose initial condition
+Hpsi0 = kinetic(psi_prev) + Vx*psi_prev + g*np.abs(psi_prev)**2*psi_prev # Hpsi_0
+psi_curr = psi_prev -dt*Hpsi0# Bootstarp => psi_1 = psi_0 -dt*Hpsi0 (in the paper it omitted psi0 at RHS)
+psi_curr /= np.linalg.norm(psi_curr)*np.sqrt(dx)
+E_prev = energy(psi_curr)
+
+#Main Loop
+
+for step in range(2,max_step+1): #Since we find out 0 & 1 step, it starts from 2
+    Hpsi = kinetic(psi_curr) + Vx*psi_curr + g*np.abs(psi_curr)**2*psi_curr # Hamiltonian on psi
+    psi_next = psi_curr - dt*Hpsi #one-step update
+    if step % renorm_every == 0: # This line stands for adjusting how frequently we want to do renormalization
+        psi_curr = psi_next
+        psi_curr /= np.linalg.norm(psi_curr)*np.sqrt(dx)
+        if step % 200 == 0: #Every 200 steps check the energy difference(as percentage) is more than tolerance
+            E = energy(psi_curr)
+            rel = abs(E-E_prev) / (abs(E_prev)+1e-16)
+            E_prev = E
+            if rel < tol:
+                break
+
+psi_gs = psi_curr.copy()
+e_gs = energy(psi_gs)
+
+end = time.time()
+print("Expectation Energy",":", e_gs,"/", "Time",":",end-start,"s")
+plt.plot(x,np.abs(psi_gs)**2)
+plt.savefig("haydi_ins.png",dpi=200)
+
