@@ -1,0 +1,97 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import os
+#parameters
+output_dir = "2time_step_graphs_neumann"
+os.makedirs(output_dir, exist_ok=True)
+Nx = 4097 #Number of grid
+Lx = 6.0#[-Lx,Lx]
+g = 1 #Str of coupling
+lam0 = 1 #exp(-x^2/lam0)
+tol = 1e-10 #energy changing limit
+max_step = 1_000_000 #Safety limit
+renorm_every = 1 #renrom=1#
+f=0.05 #potential coeff
+
+#space grid & time step
+
+x = np.linspace(-Lx,Lx,Nx) #array
+dx = x[1]-x[0] #delta x
+dt = 0.2*dx*dx #imaginary time step
+
+
+#Kinetic and Potential Part
+
+def laplacian_1d_neumann(psi):
+    lap = np.empty_like(psi)
+    lap[1:-1] = (psi[2:] - 2*psi[1:-1] + psi[:-2]) / (dx*dx)
+    # Neumann ends: psi' = 0
+    lap[0]    = 2.0*(psi[1]     - psi[0])     / (dx*dx)
+    lap[-1]   = 2.0*(psi[-2]    - psi[-1])    / (dx*dx)
+    return lap
+
+def kinetic(psi):
+    return -0.5*laplacian_1d_neumann(psi)
+
+def normalize(psi):
+    nrm = np.sum(np.abs(psi)**2)*dx
+    psi /= np.sqrt(nrm + 1e-300)
+    return psi
+
+Vx = f*x**2 #potential term = 0.5*x^2
+
+psi0 = np.exp(-x*x/lam0) #exp(-x/lam0)
+psi0 = normalize(psi0) #normalization of psi0 and dx
+
+#Energy
+
+def energy(psi):
+    dpsi = np.empty_like(psi)
+    dpsi[1:-1] = (psi[2:] - psi[:-2])/(2*dx)  #here why did we used two-step version
+    dpsi[0] = 0.0
+    dpsi[-1] = 0.0
+    kin = 0.5*np.sum(np.abs(dpsi)**2)*dx
+    pot = np.sum(Vx*np.abs(psi)**2)*dx
+    non = 0.5*g*np.sum(np.abs(psi)**4)*dx
+    return kin+pot+non
+
+#Road to Ground State
+
+#Bootstrap
+
+psi_prev = psi0.copy() #To not lose initial condition
+Hpsi0 = kinetic(psi_prev) + Vx*psi_prev + g*np.abs(psi_prev)**2*psi_prev # Hpsi_0
+psi_curr = psi_prev -dt*Hpsi0# Bootstarp => psi_1 = psi_0 -dt*Hpsi0 (in the paper it omitted psi0 at RHS)
+psi_curr = normalize(psi_curr)
+E_prev = energy(psi_curr)
+
+#Main Loop
+
+start_step = 10
+end_step = max_step
+interval = 500_000
+
+for step in range(2,end_step+1): #Since we find out 0 & 1 step, it starts from 2
+    Hpsi = kinetic(psi_curr) + Vx*psi_curr + g*np.abs(psi_curr)**2*psi_curr # Hamiltonian on psi
+    psi_next = psi_prev - 2*dt*Hpsi #two-step update
+    if step % renorm_every == 0: # This line stands for adjusting how frequently we want to do renormalization
+        psi_prev, psi_curr = psi_curr, psi_next
+        psi_prev = normalize(psi_prev)
+        psi_curr = normalize(psi_curr)
+        if start_step <= step <= end_step and step % interval == 0:
+            plt.plot(x,np.abs(psi_prev)**2)
+            if step % 200 == 0: #Every 200 steps check the energy difference(as percentage) is more than tolerance
+                E = energy(psi_curr)
+                rel = abs(E-E_prev) / (abs(E_prev)+1e-16)
+                E_prev = E
+                if rel < tol:
+                    break
+
+psi_gs = psi_curr.copy()
+e_gs = energy(psi_gs)
+print(e_gs)
+plt.xlabel("x")
+plt.ylabel(r"$|\psi(x)|^2$")
+plt.title("Wavefunction evolution at selected steps")
+
+plt.savefig(os.path.join(output_dir, "all_steps_neumann.png"), dpi=200)
