@@ -1,0 +1,95 @@
+# Spherically Symmetric 3D GPE (imag-time) for φ=rψ, ℏ=m=ω=1
+import numpy as np
+import matplotlib.pyplot as plt
+import time, os
+
+output_dir = "Spherically_Symmetric"
+os.makedirs(output_dir, exist_ok=True)
+
+start = time.time()
+Nx = 4097
+R = 2.5
+R_sing = 1e-3
+g = 0.5
+tol = 1e-10
+max_step = 1_000_000
+renorm_every = 1
+
+x = np.linspace(R_sing, R, Nx)
+dx = x[1]-x[0]
+dt = 0.5*dx*dx
+Vx = 0.5*x**2
+
+def enforce_dirichlet(phi):
+    phi[0]  = 0.0
+    phi[-1] = 0.0
+    return phi
+
+def laplacian_dirichlet(phi):
+    lap = np.empty_like(phi)
+    # interior
+    lap[1:-1] = (phi[2:] - 2*phi[1:-1] + phi[:-2])/(dx*dx)
+    # boundaries consistent with Dirichlet (simple ghost reflection)
+    lap[0]  = (phi[1] - 2*phi[0] + (-phi[1]))/(dx*dx)
+    lap[-1] = ((-phi[-2]) - 2*phi[-1] + phi[-2])/(dx*dx)
+    return lap
+
+def kinetic(phi):
+    return -0.5*laplacian_dirichlet(phi)
+
+def normalize(phi):
+    nrm = 4*np.pi*np.sum(np.abs(phi)**2)*dx
+    phi = phi/np.sqrt(nrm + 1e-300)
+    return enforce_dirichlet(phi)
+
+def energy(phi, return_parts=False):
+    dphi = np.empty_like(phi)
+    dphi[1:-1] = (phi[2:] - phi[:-2])/(2*dx)
+    dphi[0] = 0.0; dphi[-1] = 0.0
+    Ek  = 0.5 * 4*np.pi*np.sum(np.abs(dphi)**2)*dx
+    Ep  =       4*np.pi*np.sum(Vx*np.abs(phi)**2)*dx
+    Enl = 0.5 * 4*np.pi*g*np.sum((np.abs(phi)**4)/(x**2))*dx
+    if return_parts:
+        return Ek+Ep+Enl, (Ek, Ep, Enl)
+    return Ek+Ep+Enl
+
+# ---- init
+phi = np.exp(-x*x)
+phi = normalize(phi)
+
+# bootstrap (optional)
+Hphi = kinetic(phi) + Vx*phi + (g/(x**2))*np.abs(phi)**2*phi
+phi  = normalize(phi - dt*Hphi)
+
+E_prev = energy(phi)
+print_every = 2000  # avoid spam
+
+for step in range(1, max_step+1):
+    Hphi = kinetic(phi) + Vx*phi + (g/(x**2))*np.abs(phi)**2*phi
+    phi  = normalize(phi - dt*Hphi)
+
+    if step % 200 == 0:
+        E = energy(phi)
+        rel = abs(E - E_prev)/(abs(E_prev) + 1e-16)
+        E_prev = E
+        if step % print_every == 0:
+            Etot, (Ek, Ep, Enl) = energy(phi, return_parts=True)
+            vir = 2*Ek - 2*Ep + 3*Enl
+            nrm = 4*np.pi*np.sum(np.abs(phi)**2)*dx
+            print(f"step {step:>8d}  E={Etot:.10f}  relΔE={rel:.2e}  norm={nrm:.8f}  vir={vir:.2e}")
+        if rel < tol:
+            break
+
+phi_gs = phi.copy()
+E_gs, (Ek, Ep, Enl) = energy(phi_gs, return_parts=True)
+
+plt.figure()
+plt.plot(x, np.abs(phi_gs)**2)
+plt.xlabel("r"); plt.ylabel(r"$|\phi(r)|^2$")
+plt.title("Ground-state density (s-wave)")
+plt.tight_layout()
+plt.savefig(os.path.join(output_dir, "Spherically_sim_one-step.png"), dpi=200)
+
+end = time.time()
+print("Expectation Energy:", E_gs, "/ Time:", end-start, "s")
+print(f"Components: Ek={Ek:.6f}, Ep={Ep:.6f}, Enl={Enl:.6f},  Virial(≈0)={2*Ek-2*Ep+3*Enl:.3e}")
