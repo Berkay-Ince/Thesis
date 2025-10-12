@@ -1,0 +1,113 @@
+# Spherically symmetric 3D GPE in imaginary time for φ=rψ (ℏ=m=ω=1), leapfrog (two-step in time)
+import numpy as np
+import matplotlib.pyplot as plt
+import os
+
+# ---------------- params ----------------
+output_dir = "two-step_time_spherically_symmetric"
+os.makedirs(output_dir, exist_ok=True)
+
+Nx = 4097
+R = 2.5
+R_sing = 1e-3
+g = 0.005
+tol = 1e-10
+max_step = 500_000
+renorm_every = 1
+
+x = np.linspace(R_sing, R, Nx)
+dx = x[1] - x[0]
+dt = 0.01* dx * dx   # reduce if you see oscillations
+
+Vx = 0.5 * x**2
+
+# ------------- helpers ------------------
+def enforce_dirichlet(phi):
+    phi[0]  = 0.0
+    phi[-1] = 0.0
+    return phi
+
+def laplacian_dirichlet(phi):
+    lap = np.empty_like(phi)
+    lap[1:-1] = (phi[2:] - 2*phi[1:-1] + phi[:-2]) / (dx*dx)
+    # simple ghost reflection consistent with Dirichlet
+    lap[0]  = (phi[1] - 2*phi[0] + (-phi[1])) / (dx*dx)
+    lap[-1] = ((-phi[-2]) - 2*phi[-1] + phi[-2]) / (dx*dx)
+    return lap
+
+def kinetic(phi):
+    return -0.5 * laplacian_dirichlet(phi)
+
+def normalize(phi):
+    nrm = 4*np.pi * np.sum(np.abs(phi)**2) * dx
+    phi = phi / np.sqrt(nrm + 1e-300)
+    return enforce_dirichlet(phi)
+
+def energy(phi, return_parts=False):
+    # centered gradient for kinetic energy
+    dphi = np.empty_like(phi)
+    dphi[1:-1] = (phi[2:] - phi[:-2]) / (2*dx)
+    dphi[0] = 0.0
+    dphi[-1] = 0.0
+
+    Ek  = 0.5 * 4*np.pi * np.sum(np.abs(dphi)**2) * dx
+    Ep  =       4*np.pi * np.sum(Vx * np.abs(phi)**2) * dx
+    Enl = 0.5 * 4*np.pi * g * np.sum((np.abs(phi)**4) / (x**2)) * dx
+
+    Etot = Ek + Ep + Enl
+    if return_parts:
+        return Etot, (Ek, Ep, Enl)
+    return Etot
+
+# ------------- init ---------------------
+phi0 = np.exp(-x*x)
+phi0 = normalize(phi0)
+
+phi_prev = phi0.copy()
+Hphi0 = kinetic(phi_prev) + Vx*phi_prev + (g/(x**2))*np.abs(phi_prev)**2*phi_prev
+phi_curr = normalize(phi_prev - dt*Hphi0)
+
+E_prev = energy(phi_curr)
+
+# choose a few snapshot steps
+snapshots = {max_step//3, 2*max_step//3, max_step}
+print_every = 2000
+
+# ------------- main loop ----------------
+for step in range(2, max_step+1):
+    Hphi = kinetic(phi_curr) + Vx*phi_curr + (g/(x**2))*np.abs(phi_curr)**2*phi_curr
+    phi_next = phi_prev - 2*dt*Hphi  # leapfrog step
+    phi_next = enforce_dirichlet(phi_next)
+
+    if step % renorm_every == 0:
+        phi_prev, phi_curr = phi_curr, normalize(phi_next)
+
+        if step in snapshots:
+            plt.plot(x, np.abs(phi_prev)**2, label=f"step {step}")
+
+        if step % 200 == 0:
+            E = energy(phi_curr)
+            rel = abs(E - E_prev) / (abs(E_prev) + 1e-16)
+            E_prev = E
+
+            if step % print_every == 0:
+                Etot, (Ek, Ep, Enl) = energy(phi_curr, return_parts=True)
+                vir = 2*Ek - 2*Ep + 3*Enl
+                nrm = 4*np.pi*np.sum(np.abs(phi_curr)**2)*dx
+                print(f"step {step:>8d}  E={Etot:.10f}  relΔE={rel:.2e}  norm={nrm:.8f}  vir={vir:.2e}")
+
+            if rel < tol:
+                print(f"Converged at step {step}")
+                break
+
+phi_gs = phi_curr.copy()
+E_gs, (Ek, Ep, Enl) = energy(phi_gs, return_parts=True)
+print("Ground-state energy ~", E_gs, "(expected ≈ 1.5 when g=0)")
+print(f"Components: Ek={Ek:.6f}, Ep={Ep:.6f}, Enl={Enl:.6f},  Virial(≈0): {2*Ek-2*Ep+3*Enl:.3e}")
+
+plt.xlabel("r")
+plt.ylabel(r"$|\phi(r)|^2$")
+plt.title("Wavefunction evolution at selected steps")
+plt.legend(loc="best")
+plt.tight_layout()
+plt.savefig(os.path.join(output_dir, "two_step_spherically_sim.png"), dpi=200)
