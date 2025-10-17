@@ -1,0 +1,101 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import os
+output_dir = "TSPP_Spherically_Sim_Graphs"
+os.makedirs(output_dir, exist_ok=True)
+
+# ---------------- params ----------------
+N = 4095
+g = 5
+tol = 1e-10
+max_iter = 150_000
+renorm_step = 1
+R = 6
+
+# interior Dirichlet grid: r in (0,R) with r_j = j*dr, j=1..N
+dr = R / (N + 1)
+r = np.arange(1, N + 1) * dr
+dt = 0.5 * dr * dr
+
+# -------- Strang: V(dt/2) - T(dt) - V(dt/2) --------
+def pot_nonlin(phi, half=False):
+    # evolve phi = r * psi_phys  =>  V_eff = 0.5 r^2 + g |phi|^2 / r^2
+    Veff = 0.5 * r**2 + g * (np.abs(phi)**2) / (r**2)
+    h = 0.5 * dt if half else dt
+    return np.exp(-h * Veff) * phi
+
+def kinetic_fft_dirichlet(phi):
+    """
+    Kinetic step with Dirichlet BCs via odd extension + FFT
+    (equivalent to a sine transform on (0,R)).
+    """
+    N = phi.size
+    # odd extension: [0, phi1, ..., phiN, 0, -phiN, ..., -phi1]
+    ext = np.empty(2*(N+1), dtype=complex)
+    ext[0] = 0.0
+    ext[1:N+1] = phi
+    ext[N+1] = 0.0
+    ext[N+2:] = -phi[::-1]
+
+    L = 2*(N+1)
+    k = 2*np.pi * np.fft.fftfreq(L, d=dr)
+    ext_k = np.fft.fft(ext)
+    ext_k *= np.exp(-0.5 * (k**2) * dt)  # full kinetic step
+    ext = np.fft.ifft(ext_k)
+    return np.real(ext[1:N+1])
+
+def tspp(phi):
+    phi = pot_nonlin(phi, half=True)
+    phi = kinetic_fft_dirichlet(phi)
+    phi = pot_nonlin(phi, half=True)
+    return phi
+
+# -------- initial state & helpers --------
+# IMPORTANT: we evolve phi=r*psi_phys (not psi_phys)
+phi = r * np.exp(-0.5 * r**2)
+
+def normalize_phi(phi):
+    # For phi: 4π ∫ |phi|^2 dr = 1
+    nrm = np.sqrt(4*np.pi*np.sum(np.abs(phi)**2) * dr)
+    return phi / (nrm + 1e-300)
+
+def energy(phi):
+    # non-periodic derivative (Dirichlet 0 at both ends)
+    dphi = np.empty_like(phi)
+    dphi[1:-1] = (phi[2:] - phi[:-2]) / (2*dr)
+    dphi[0]    = (phi[1] - 0.0) / (2*dr)
+    dphi[-1]   = (0.0 - phi[-2]) / (2*dr)
+    kin = 0.5 * 4*np.pi * np.sum(np.abs(dphi)**2) * dr
+    pot =       4*np.pi * np.sum(0.5 * r**2 * np.abs(phi)**2) * dr
+    non = 0.5 * 4*np.pi * g * np.sum((np.abs(phi)**4) / (r**2)) * dr
+    return kin + pot + non
+
+# -------- imaginary-time loop --------
+phi = normalize_phi(phi)
+E_prev = energy(phi)
+
+for step in range(max_iter):
+    phi_new = tspp(phi)
+
+    if step % renorm_step == 0:
+        # normalize *new* state (was using old psi before)
+        phi_new = normalize_phi(phi_new)
+
+    phi = phi_new
+
+    if step % 100 == 0:
+        E_new = energy(phi)
+        rel = abs(E_new - E_prev) / (abs(E_prev) + 1e-16)
+        print(f"Step: {step}, Energy: {E_new:.8f}, dE/E: {rel:.3e}")
+        if rel < tol:
+            break
+        E_prev = E_new
+
+# Plot physical density |psi|^2 = |phi|^2 / r^2
+plt.plot(r, np.abs(phi)**2, label='|psi_phys|^2 (final)')
+plt.xlabel('Radius r')
+plt.ylabel('|psi|^2')
+plt.title('Radial Probability Density')
+plt.legend(); plt.grid(True)
+plt.savefig(os.path.join(output_dir, "Radial_Probability_Density.png"), dpi=200)
+plt.show()
