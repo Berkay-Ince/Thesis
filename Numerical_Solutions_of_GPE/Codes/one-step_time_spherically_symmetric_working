@@ -54,7 +54,7 @@ def energy(phi, return_parts=False):
     return Ek+Ep+Enl
 
 # ---- init
-phi = np.exp(-x*x)
+phi = x*np.exp(-x*x)
 phi = normalize(phi)
 
 # bootstrap (optional)
