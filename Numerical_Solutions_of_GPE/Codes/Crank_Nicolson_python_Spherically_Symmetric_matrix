@@ -1,0 +1,104 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import os
+import scipy as sp
+output_dir = "Crank_Nicolson_python_Spherically_Sim_matrix_graphs"
+os.makedirs(output_dir, exist_ok=True)
+
+# Parameters
+N = 4095  # Number of spatial points
+g = 0
+tol = 1e-15
+max_iter = 200_000
+renorm_step = 1
+R = 6
+
+# interior Dirichlet grid: r in (0,R) with r_j = j*dr, j=1..N
+dr = R / (N + 1)
+r = np.arange(1, N + 1) * dr
+dt = 1 * dr * dr
+alpha = dt / (4* dr * dr)
+#Construction of matrix
+
+#Diagonal part
+
+def diagonal_part(psi):
+    C = r**2 * dt/4 + 2*alpha + (dt*g*abs(psi)**2)/(2*r**2)
+    return C
+
+def construct_A_banded(C):
+    ab = np.zeros((3, C.size), dtype=complex)
+    ab[0, 1:] = -alpha          # super-diagonal
+    ab[1, :]  = 1+C           # main diagonal
+    ab[2, :-1] = -alpha         # sub-diagonal
+    return ab
+
+def construct_B_rhs(C, psi):
+    # B = -diag(C) + off-diagonals = +1 on sub/super
+    rhs = (1-C) * psi
+    rhs[:-1] += alpha*psi[1:]
+    rhs[1:]  += alpha*psi[:-1]
+    return rhs
+
+#Normalization
+
+def normalize_psi(psi):
+    # For psi: 4π ∫ |psi|^2 dr = 1
+    nrm = np.sqrt(4 * np.pi * np.sum(np.abs(psi)**2) * dr)
+    return psi / (nrm + 1e-300)
+
+# Initial wavefunction
+psi_in = r * np.exp(-r**2)
+psi_in = normalize_psi(psi_in)
+
+# Matrix Solver
+
+def crank_nicolson_step(psi):
+    C = diagonal_part(psi)
+    A_ab = construct_A_banded(C)
+    b = construct_B_rhs(C, psi)
+    psi_new = sp.linalg.solve_banded((1, 1), A_ab, b)
+    return psi_new
+
+
+def energy(psi):
+    # non-periodic derivative (Dirichlet 0 at both ends)
+    dpsi = np.empty_like(psi)
+    dpsi[0]    = (psi[1] - 0.0) / dr
+    dpsi[1:-1] = (psi[2:] - psi[:-2]) / (2*dr)
+    dpsi[-1]   = (0.0 - psi[-2]) / dr
+
+    kin = 0.5 * 4*np.pi * np.sum(np.abs(dpsi)**2) * dr
+    pot =       4*np.pi * np.sum(0.5 * r**2 * np.abs(psi)**2) * dr
+    non = 0.5 * 4*np.pi * g * np.sum((np.abs(psi)**4) / (r**2)) * dr
+    return kin + pot + non
+
+# Imaginary time propagation loop
+psi = psi_in.copy()
+E_prev = energy(psi)
+for step in range(max_iter):
+
+    psi_new = crank_nicolson_step(psi)
+
+    if step % renorm_step == 0:
+        psi_new = normalize_psi(psi_new)
+    
+    psi = psi_new
+
+    if step % 100 == 0:
+        E_new = energy(psi)
+        rel = 2*abs(E_new - E_prev) / (abs(E_prev) + 1e-16)
+        print(f"Step: {step}, Energy: {E_new:.8f}, dE/E: {rel:.3e}")
+        if rel < tol:
+            break
+        E_prev = E_new
+
+# Plot physical density |psi|^2 = |phi|^2 / r^2
+plt.plot(r, np.abs(psi)**2, label='|psi_phys|^2 (final)')
+plt.xlabel('Radius r')
+plt.ylabel('|psi|^2')
+plt.title('Radial Probability Density')
+plt.legend(); plt.grid(True)
+plt.savefig(os.path.join(output_dir, "Radial_Probability_Density.png"), dpi=200)
+plt.show()
+
