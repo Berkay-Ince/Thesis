@@ -23,7 +23,11 @@ alpha = dt / (4* dr * dr)
 #Diagonal part
 
 def diagonal_part(psi):
-    C = r**2 * dt/4 + 2*alpha + (dt*g*abs(psi)**2)/(2*r**2)
+    V= 0.5 * r**2
+    Non_lin = g * abs(psi)**2 / (r**2)
+    Kinetic_Term = 2 * alpha / dt
+    Hamiltonian = V + Non_lin+ Kinetic_Term
+    C = dt * Hamiltonian/2
     return C
 
 def construct_A_banded(C):
