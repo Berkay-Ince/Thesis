@@ -5,8 +5,7 @@
 namespace cGPE {
 
 struct params {
-    
-    int N = 4096;          // Number of spatial grid points
+
     double R = 6.0;       // Boundary radius
     double g = 0.0;      // Interaction strength
     double tol = 1e-10;     // Tolerance for numerical methods
@@ -15,6 +14,7 @@ struct params {
 };
 
 inline constexpr double pi = 3.14159265358979323846;
+inline constexpr int N_default = 8192; // Number of spatial grid points for extended domain -R to R
 
 struct sweep_parameters
 {
@@ -23,4 +23,3 @@ struct sweep_parameters
 };
 
 }
-
