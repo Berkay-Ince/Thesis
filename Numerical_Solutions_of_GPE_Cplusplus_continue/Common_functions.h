@@ -52,14 +52,18 @@ inline std::vector<double> Potential_function(const std::vector<double> &r)
     // Normalization for 3D radial wavefunction (psi = r * phi)
 inline void normalize_symmetric(std::vector<double> &psi, double dr)
 {
-        double norm = 0.0;
-        for (std::size_t i = 0; i < psi.size(); ++i) {
-            norm += psi[i] * psi[i] * dr;
-        }
-        norm = std::sqrt(4.0 * cGPE::pi * norm);
-        for (std::size_t i = 0; i < psi.size(); ++i) {
-            psi[i] /= (norm+1e-30);
-        }
+    std::size_t N = psi.size();
+    std::size_t mid = N/2; 
+    
+    double norm = 0.0;
+
+    for (std::size_t i = mid+1; i < N; ++i) {
+        norm += psi[i] * psi[i] * dr;
+    }
+    norm = std::sqrt(4.0 * cGPE::pi * norm);
+    for (std::size_t i = 0; i < psi.size(); ++i) {
+        psi[i] /= (norm+1e-30);
+    }
 }
 
     // Expectation value of energy
@@ -73,7 +77,8 @@ inline double energy_expectation(const std::vector<double> &psi,
         double E_int = 0.0;
 
         std::size_t N = psi.size();
-        for (std::size_t i =1; i < N-1; ++i) {
+        std::size_t mid = N / 2;
+        for (std::size_t i =mid+1; i < N-1; ++i) {
             double dpsi = (psi[i+1] - psi[i-1]) / (2.0 * dr);
             E_kin += 0.5 * 4.0 * cGPE::pi * dpsi * dpsi * dr;
             E_pot += 4.0 * cGPE::pi * V[i] *psi[i] * psi[i] * dr;
